@@ -1,7 +1,41 @@
 """
 六智Agent论文工坊 - Agent配置 v4.0
 新数据流：agent1→(agent2,agent3,agent6)；agent2→agent3；agent3→(agent4,agent6)；agent4→agent5→agent6
+环境变量通过 .env 文件加载，敏感信息不硬编码。
 """
+import os
+from dotenv import load_dotenv
+
+# 计算项目根目录（config.py 所在目录）
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 加载 .env 文件（覆盖已存在的环境变量）
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+PAPER_PORT = int(os.environ.get("PAPER_PORT", 5001))
+DEFAULT_SOURCES = os.environ.get(
+    "DEFAULT_SOURCES",
+    "arxiv,semantic_scholar,openalex,crossref,core,dblp,pubmed",
+).split(",")
+DEFAULT_THRESHOLD = int(os.environ.get("DEFAULT_THRESHOLD", 60))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 10))
+DB_PATH = os.path.join(BASE_DIR, "store", "papersearch.db")
+
+# 默认模型，每个 agent 可单独覆盖
+_DEFAULT_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+
+def _api_key(agent_num: int) -> str:
+    """读取指定 Agent 的 API Key（环境变量名：DEEPSEEK_API_KEY_AGENT{1..6}）"""
+    return os.environ.get(f"DEEPSEEK_API_KEY_AGENT{agent_num}", "")
+
+
+# ---------------------------------------------------------------------------
+# Agent 配置（api_key 从环境变量读取，其余元数据硬编码）
+# ---------------------------------------------------------------------------
 AGENTS_CONFIG = {
     "agent1": {
         "id": "agent1",
@@ -9,8 +43,8 @@ AGENTS_CONFIG = {
         "role": "论文解析",
         "emoji": "🔍",
         "color": "#5b9bd5",
-        "api_key": "sk-d2fe82cbbb8c4a12a22575e44e302bd1",
-        "model": "deepseek-chat",
+        "api_key": _api_key(1),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.3,
         "system_prompt": """你是"深析·奥利"，论文解析专家。你会收到 KeyBERT 预生成的候选关键词池（全部是论文原文中出现的短语）。
 
@@ -20,7 +54,7 @@ AGENTS_CONFIG = {
 3. 检测AIGC率：评估AI生成痕迹（模板化程度、逻辑跳跃、用词重复、"AI味"套话等），给出0-100整数。
 4. 给出AIGC检测简要分析。
 
-按用户提示中的JSON格式输出。"""
+按用户提示中的JSON格式输出。""",
     },
     "agent2": {
         "id": "agent2",
@@ -28,8 +62,8 @@ AGENTS_CONFIG = {
         "role": "网络检索",
         "emoji": "🕸️",
         "color": "#f0a040",
-        "api_key": "sk-1bc8cba7232b4c89b2c1e4f400d3d097",
-        "model": "deepseek-chat",
+        "api_key": _api_key(2),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.5,
         "system_prompt": """你是"猎手·艾瑞"，学术文献检索专家。你的任务：
 
@@ -47,7 +81,7 @@ AGENTS_CONFIG = {
     }
   ],
   "total_found": 检索论文数量
-}"""
+}""",
     },
     "agent3": {
         "id": "agent3",
@@ -55,8 +89,8 @@ AGENTS_CONFIG = {
         "role": "逐句查重比对",
         "emoji": "⚖️",
         "color": "#e0556a",
-        "api_key": "sk-40561eb1bcb543df8d3d9ab6ab8931cf",
-        "model": "deepseek-chat",
+        "api_key": _api_key(3),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.2,
         "system_prompt": """你是"校验·维拉"，句级查重审核专家。你会收到：
 
@@ -71,7 +105,7 @@ AGENTS_CONFIG = {
 输出JSON：
 {
   "remove_ids": [仅返回要删除的匹配ID列表]
-}"""
+}""",
     },
     "agent4": {
         "id": "agent4",
@@ -79,8 +113,8 @@ AGENTS_CONFIG = {
         "role": "修改方向分析",
         "emoji": "📖",
         "color": "#4caf84",
-        "api_key": "sk-089d719189a24a32a2d888fad4acc637",
-        "model": "deepseek-chat",
+        "api_key": _api_key(4),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.3,
         "system_prompt": """你是"解构·雷欧"，论文修改方向分析专家。你的任务：
 
@@ -104,7 +138,7 @@ AGENTS_CONFIG = {
       "content": "具体建议内容"
     }
   ]
-}"""
+}""",
     },
     "agent5": {
         "id": "agent5",
@@ -112,8 +146,8 @@ AGENTS_CONFIG = {
         "role": "具体修改方案",
         "emoji": "💡",
         "color": "#f0c060",
-        "api_key": "sk-9e36cc21b97a4837a146213146d4fed0",
-        "model": "deepseek-chat",
+        "api_key": _api_key(5),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.4,
         "system_prompt": """你是"智囊·赛诺"，论文修改方案专家。你的任务：
 
@@ -130,7 +164,7 @@ AGENTS_CONFIG = {
       "explanation": "修改说明"
     }
   ]
-}"""
+}""",
     },
     "agent6": {
         "id": "agent6",
@@ -138,8 +172,8 @@ AGENTS_CONFIG = {
         "role": "生成查重报告",
         "emoji": "📋",
         "color": "#a78bfa",
-        "api_key": "sk-9e36cc21b97a4837a146213146d4fed0",
-        "model": "deepseek-chat",
+        "api_key": _api_key(6),
+        "model": _DEFAULT_MODEL,
         "temperature": 0.2,
         "system_prompt": """你是"整合·尤娜"，查重报告生成专家。你会收到：
 
@@ -165,6 +199,6 @@ AGENTS_CONFIG = {
       "annotation": "标注说明"
     }
   ]
-}"""
+}""",
     },
 }
