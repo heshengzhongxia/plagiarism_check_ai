@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f1119;
+  --card: #1a1e2b;
+  --text: #e0e6f0;
+  --muted: #7b8ca8;
+  --border: rgba(255,255,255,0.08);
+  --accent: #5b9bd5;
+  --gold: #f0c060;
+  --danger: #e0556a;
+  --success: #4caf84;
+  --purple: #a78bfa;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: linear-gradient(160deg, #0a0d15 0%, #151b28 40%, #1a1f30 100%);
+  color: var(--text);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+}
