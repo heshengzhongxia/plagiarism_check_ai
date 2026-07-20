@@ -1,0 +1,15 @@
+[Unit]
+Description=六智Agent论文工坊
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/wwwroot/111.com/论文查验
+Environment="PAPER_PORT=5001"
+ExecStart=/usr/bin/python3 -m gunicorn -w 1 --timeout 120 -b 0.0.0.0:5001 server:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
