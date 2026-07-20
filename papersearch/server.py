@@ -7,15 +7,14 @@ import json
 import time
 import threading
 import sys
-import tempfile
-import base64 as b64
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 
 from config import AGENTS_CONFIG
 from agents import create_agent
 from services.paper_api import search_all, ALL_SOURCES
-from cnki_spider import cnki_tasks, run_spider, TEMP_DIR as CNKI_TEMP_DIR, HAS_PLAYWRIGHT
+from cnki_spider import TEMP_DIR as CNKI_TEMP_DIR
+from routes import register_routes
 
 app = Flask(__name__, static_folder='.')
 CORS(app)
@@ -42,357 +41,12 @@ def _system_msg(message, emoji="⚙️"):
 
 
 # ============================================================
-# 文件解析
-# ============================================================
-
-def extract_text_from_pdf(filepath):
-    """从PDF文件提取文本"""
-    try:
-        from PyPDF2 import PdfReader
-        reader = PdfReader(filepath)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text.strip()
-    except Exception as e:
-        raise ValueError(f"PDF解析失败: {e}")
-
-
-def extract_text_from_docx(filepath):
-    """从Word文件提取文本"""
-    try:
-        from docx import Document
-        doc = Document(filepath)
-        text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-        return text.strip()
-    except Exception as e:
-        raise ValueError(f"Word解析失败: {e}")
-
-
-def extract_text(filepath, filename):
-    """根据文件扩展名自动选择解析方式"""
-    ext = os.path.splitext(filename)[1].lower()
-    if ext == '.pdf':
-        return extract_text_from_pdf(filepath)
-    elif ext in ('.docx', '.doc'):
-        return extract_text_from_docx(filepath)
-    elif ext == '.txt':
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-            return f.read().strip()
-    else:
-        raise ValueError(f"不支持的文件格式: {ext}，请上传 PDF / Word / TXT 文件")
-
-
-# ============================================================
 # Routes
 # ============================================================
 
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
-
-
-@app.route('/api/sources', methods=['GET'])
-def get_sources():
-    sources = [{"id": sid, "name": info["name"], "desc": info["desc"]}
-               for sid, info in ALL_SOURCES.items()]
-    return jsonify({"sources": sources})
-
-
-@app.route('/api/keywords', methods=['POST'])
-def extract_keywords_only():
-    """
-    只跑 agent1 出关键词（复用和流水线完全相同的 Agent1Parser）。
-    前端收到关键词 → 用户去知网搜 → 上传PDF → 点「开始比对」→ /api/start。
-    """
-    data = request.json or {}
-    paper_text = data.get('paper', '').strip()
-    if not paper_text:
-        return jsonify({"error": "论文内容不能为空"}), 400
-
-    try:
-        agent1_cfg = AGENTS_CONFIG.get("agent1", {})
-        agent1 = create_agent("agent1", agent1_cfg)
-        result = agent1.think(paper_text)
-        inner = result.get("result", {})
-
-        return jsonify({
-            "keywords": inner.get("keywords", []),
-            "title": inner.get("title", ""),
-            "messages": result.get("messages", []),
-            "status": "ok",
-        })
-    except Exception as e:
-        return jsonify({"error": f"关键词提取失败: {str(e)[:200]}"}), 500
-
-
-@app.route('/api/start', methods=['POST'])
-def start_analysis():
-    global task_counter
-    data = request.json or {}
-    paper_text = data.get('paper', '').strip()
-    auto_mode = data.get('auto_mode', True)
-    sources = data.get('sources', None)
-    threshold = data.get('threshold', 60)
-    cnki_url = data.get('cnki_url', '').strip()
-    cnki_html = data.get('cnki_html', '').strip()
-    cnki_papers_upload = data.get('cnki_papers', [])
-
-    if not paper_text:
-        return jsonify({"error": "论文内容不能为空"}), 400
-
-    with task_lock:
-        task_counter += 1
-        task_id = f"task_{task_counter}"
-
-    task_store[task_id] = {
-        "status": "processing", "auto_mode": auto_mode, "paused": False,
-        "current_agent": 0, "conversation": [],
-        "agents_status": {f"agent{i}": {"status": "待命", "progress": 0} for i in range(1, 7)},
-        "agent_results": {}, "final_report": None, "docx_path": None,
-        "sources": sources or list(ALL_SOURCES.keys()), "real_papers": None,
-        "threshold": threshold, "cnki_url": cnki_url, "cnki_html": cnki_html, "cnki_papers": cnki_papers_upload,
-    }
-
-    _add_message(task_id, _system_msg(f"论文分析任务已创建，{'自动' if auto_mode else '手动'}流转模式，相似度阈值{threshold}%", "🚀"))
-
-    thread = threading.Thread(target=execute_pipeline, args=(task_id, paper_text, auto_mode, threshold), daemon=True)
-    thread.start()
-    return jsonify({"task_id": task_id, "status": "started"})
-
-
-@app.route('/api/status/<task_id>', methods=['GET'])
-def get_status(task_id):
-    task = task_store.get(task_id)
-    if not task:
-        return jsonify({"error": "任务不存在"}), 404
-    since = request.args.get('since', 0, type=int)
-    conversation = task.get("conversation", [])
-    return jsonify({
-        "task_id": task_id, "status": task["status"],
-        "auto_mode": task.get("auto_mode", True), "paused": task.get("paused", False),
-        "needs_confirm": task.get("needs_confirm", False),
-        "current_agent": task.get("current_agent", 0),
-        "agents_status": task.get("agents_status", {}),
-        "conversation": conversation[since:], "total_messages": len(conversation),
-        "report": task.get("final_report"), "docx_ready": bool(task.get("docx_path")),
-        "cnki_task_id": task.get("cnki_task_id"),
-        "batch_progress": task.get("batch_progress", ""),
-        "batch_pct": task.get("batch_pct", 0),
-    })
-
-
-@app.route('/api/confirm/<task_id>', methods=['POST'])
-def confirm_agent(task_id):
-    task = task_store.get(task_id)
-    if not task: return jsonify({"error": "任务不存在"}), 404
-    task["paused"] = False; task["needs_confirm"] = False
-    _add_message(task_id, _system_msg("用户已确认", "▶️"))
-    return jsonify({"status": "ok"})
-
-
-@app.route('/api/retry/<task_id>', methods=['POST'])
-def retry_agent(task_id):
-    task = task_store.get(task_id)
-    if not task: return jsonify({"error": "任务不存在"}), 404
-    task["retry_requested"] = True; task["paused"] = False; task["needs_confirm"] = False
-    _add_message(task_id, _system_msg("用户要求重新处理", "🔄"))
-    return jsonify({"status": "ok"})
-
-
-@app.route('/api/report/<task_id>', methods=['GET'])
-def get_report(task_id):
-    task = task_store.get(task_id)
-    if not task: return jsonify({"error": "任务不存在"}), 404
-    return jsonify({
-        "task_id": task_id, "report": task.get("final_report", {}),
-        "agent_results": task.get("agent_results", {}),
-        "conversation": task.get("conversation", []),
-        "real_papers": task.get("real_papers"),
-        "docx_ready": bool(task.get("docx_path")),
-    })
-
-
-@app.route('/api/upload', methods=['POST'])
-def upload_file():
-    """上传PDF/Word/TXT文件，返回提取的文本"""
-    if 'file' not in request.files:
-        return jsonify({"error": "未选择文件"}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "文件名为空"}), 400
-
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ('.pdf', '.docx', '.doc', '.txt'):
-        return jsonify({"error": f"不支持的文件格式: {ext}，请上传 PDF / Word / TXT 文件"}), 400
-
-    try:
-        # 保存临时文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-            file.save(tmp.name)
-            tmp_path = tmp.name
-
-        text = extract_text(tmp_path, file.filename)
-        os.unlink(tmp_path)  # 删除临时文件
-
-        char_count = len(text)
-        return jsonify({
-            "text": text,
-            "filename": file.filename,
-            "char_count": char_count,
-            "status": "ok",
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/download/<task_id>', methods=['GET'])
-def download_report(task_id):
-    task = task_store.get(task_id)
-    if not task: return jsonify({"error": "任务不存在"}), 404
-    docx_path = task.get("docx_path")
-    if not docx_path or not os.path.exists(docx_path):
-        return jsonify({"error": "报告文件不存在或尚未生成"}), 404
-    return send_file(
-        docx_path,
-        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        as_attachment=True,
-        download_name="查重报告_原论文.docx"
-    )
-
-
-# ============================================================
-# CNKI 知网爬取
-# ============================================================
-
-@app.route('/api/cnki/start', methods=['POST'])
-def cnki_start():
-    """启动知网爬取（非阻塞）"""
-    data = request.json or {}
-    cnki_url = data.get('url', '').strip()
-    if not cnki_url:
-        return jsonify({"error": "知网URL不能为空"}), 400
-
-    task_id = f"cnki_{int(time.time())}"
-    cnki_tasks[task_id] = {
-        "status": "running", "progress": 0,
-        "message": "初始化...", "papers": [],
-    }
-
-    thread = threading.Thread(target=run_spider, args=(task_id, cnki_url), daemon=True)
-    thread.start()
-
-    return jsonify({"task_id": task_id, "status": "started"})
-
-
-@app.route('/api/cnki/status/<task_id>', methods=['GET'])
-def cnki_status(task_id):
-    """获取知网爬取状态（含验证码信息）"""
-    task = cnki_tasks.get(task_id)
-    if not task:
-        return jsonify({"error": "任务不存在"}), 404
-
-    resp = dict(task)
-    # captcha_image 是bytes，需要转base64
-    if isinstance(resp.get("captcha_image"), bytes):
-        resp["captcha_image"] = b64.b64encode(resp["captcha_image"]).decode('utf-8')
-    return jsonify(resp)
-
-
-@app.route('/api/cnki/solve/<task_id>', methods=['POST'])
-def cnki_solve(task_id):
-    """提交验证码答案 / 确认手动操作"""
-    data = request.json or {}
-    answer = data.get('answer', '').strip()
-    username = data.get('username', '').strip()
-    password = data.get('password', '').strip()
-    confirm = data.get('confirm', False)
-
-    if task_id in cnki_tasks:
-        if answer:
-            cnki_tasks[task_id]["captcha_answer"] = answer
-        if username and password:
-            cnki_tasks[task_id]["credentials"] = {"username": username, "password": password}
-        if confirm:
-            cnki_tasks[task_id]["user_confirmed"] = True
-        new_url = data.get('new_url', '').strip()
-        if new_url:
-            cnki_tasks[task_id]["new_url"] = new_url
-        return jsonify({"status": "ok"})
-    return jsonify({"error": "任务不存在"}), 404
-
-
-@app.route('/api/cnki/parse', methods=['POST'])
-def cnki_parse():
-    """解析用户粘贴的知网检索结果页HTML，提取论文列表"""
-    data = request.json or {}
-    html_content = data.get('html', '').strip()
-    if not html_content:
-        return jsonify({"error": "HTML内容为空"}), 400
-
-    papers = []
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_content, 'html.parser')
-
-        # 知网检索结果的结构：找所有论文标题和摘要
-        # 方式1：找标题链接
-        for a in soup.find_all('a'):
-            href = a.get('href', '')
-            title = a.get_text(strip=True)
-            if title and len(title) > 10 and ('kns.cnki.net' in href or 'detail' in href.lower()):
-                papers.append({"title": title[:200], "url": href, "abstract": "", "source": "知网CNKI"})
-
-        # 方式2：通过class找（知网结构多变，也尝试通用方式）
-        if not papers:
-            # 找所有看起来像论文标题的文本
-            for el in soup.find_all(['h3', 'h4', 'dt', 'p', 'a']):
-                text = el.get_text(strip=True)
-                if 15 < len(text) < 200:
-                    # 检查是否有相邻的摘要
-                    next_el = el.find_next_sibling()
-                    abstract = next_el.get_text(strip=True)[:500] if next_el else ""
-                    papers.append({"title": text, "url": "", "abstract": abstract, "source": "知网CNKI"})
-
-        # 去重
-        seen = set()
-        unique = []
-        for p in papers:
-            key = p["title"][:30]
-            if key not in seen:
-                seen.add(key)
-                unique.append(p)
-
-        return jsonify({"papers": unique[:15], "total": len(unique), "status": "ok"})
-    except Exception as e:
-        return jsonify({"error": f"解析失败: {e}"}), 500
-
-
-@app.route('/api/cnki/download/<task_id>', methods=['GET'])
-def cnki_download(task_id):
-    """打包下载知网爬取的论文"""
-    task = cnki_tasks.get(task_id)
-    if not task:
-        return jsonify({"error": "任务不存在"}), 404
-
-    papers = task.get("papers", [])
-    if not papers:
-        return jsonify({"error": "无论文可下载"}), 404
-
-    # 打包为zip
-    import zipfile, tempfile
-    zip_path = os.path.join(tempfile.gettempdir(), f"cnki_{task_id}.zip")
-    with zipfile.ZipFile(zip_path, 'w') as zf:
-        for p in papers:
-            fp = p.get("file_path")
-            if fp and os.path.exists(fp):
-                zf.write(fp, os.path.basename(fp))
-    return send_file(zip_path, as_attachment=True,
-                     download_name=f"知网论文_{task_id}.zip",
-                     mimetype='application/zip')
 
 
 # ============================================================
@@ -653,6 +307,20 @@ def _wait_confirm(task_id, agent_id):
     task_store[task_id]["needs_confirm"] = False
     return False
 
+
+# ============================================================
+# 注册所有 API 路由（拆分到 routes/ 子模块）
+# ============================================================
+_deps = {
+    "task_store": task_store,
+    "task_lock": task_lock,
+    "task_counter": task_counter,
+    "REPORTS_DIR": REPORTS_DIR,
+    "AGENTS_CONFIG": AGENTS_CONFIG,
+    "sse_broker": None,  # task_routes imports the global directly
+    "pipeline_fn": execute_pipeline,
+}
+register_routes(app, _deps)
 
 # ============================================================
 if __name__ == '__main__':
