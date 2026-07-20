@@ -14,7 +14,7 @@ from flask_cors import CORS
 
 from config import AGENTS_CONFIG
 from agents import create_agent
-from paper_apis import search_all, ALL_SOURCES
+from services.paper_api import search_all, ALL_SOURCES
 from cnki_spider import cnki_tasks, run_spider, TEMP_DIR as CNKI_TEMP_DIR, HAS_PLAYWRIGHT
 
 app = Flask(__name__, static_folder='.')
