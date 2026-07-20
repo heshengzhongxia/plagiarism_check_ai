@@ -1,0 +1,24 @@
+appId: com.papersearch.agent-workshop
+productName: 六智Agent论文工坊
+directories:
+  output: dist-electron
+  buildResources: build
+files:
+  - dist/**/*
+  - electron/**/*.js
+  - papersearch/**/*.py
+  - papersearch/**/*.txt
+  - papersearch/**/*.sql
+extraResources:
+  - from: ../python-embedded
+    to: python
+    filter:
+      - "**/*"
+win:
+  target: nsis
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: 六智Agent论文工坊
