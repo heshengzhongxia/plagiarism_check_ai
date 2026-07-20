@@ -3,6 +3,7 @@ import MainLayout from './components/Layout/MainLayout'
 import LeftPanel from './components/Layout/LeftPanel'
 import CenterPanel from './components/Layout/CenterPanel'
 import RightPanel from './components/Layout/RightPanel'
+import StatusBar from './components/Layout/StatusBar'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <CenterPanel />
         <RightPanel />
       </MainLayout>
+      <StatusBar />
     </div>
   );
 }
