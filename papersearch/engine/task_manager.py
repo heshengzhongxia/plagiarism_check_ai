@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 
-from papersearch.store.repository import Repository
+from store.repository import Repository
 
 
 class TaskManager:
@@ -138,6 +138,14 @@ class TaskManager:
             }
             for t in tasks
         ]
+
+    def update_task(self, task_id: str, **kwargs) -> None:
+        """Update arbitrary columns on a task row.
+
+        Only keys in the tasks table schema are accepted; unknown keys
+        are silently dropped.  ``updated_at`` is always refreshed.
+        """
+        self._repo.update_task(task_id, **kwargs)
 
     def delete_task(self, task_id: str) -> None:
         """Remove a task and all its messages."""

@@ -11,25 +11,25 @@ from flask import Blueprint, jsonify, send_file
 report_bp = Blueprint('report', __name__)
 
 
-def register_report_routes(app, deps):
-    task_store = deps['task_store']
+def register_report_routes(app, task_manager):
 
     @report_bp.route('/api/report/<task_id>', methods=['GET'])
     def get_report(task_id):
-        task = task_store.get(task_id)
+        task = task_manager.get_status(task_id)
         if not task:
             return jsonify({"error": "任务不存在"}), 404
         return jsonify({
-            "task_id": task_id, "report": task.get("final_report", {}),
+            "task_id": task_id,
+            "report": task.get("final_report", {}),
             "agent_results": task.get("agent_results", {}),
-            "conversation": task.get("conversation", []),
-            "real_papers": task.get("real_papers"),
+            "conversation": task_manager.get_messages(task_id, 0),
+            "real_papers": None,  # real_papers is runtime-only, not persisted
             "docx_ready": bool(task.get("docx_path")),
         })
 
     @report_bp.route('/api/download/<task_id>', methods=['GET'])
     def download_report(task_id):
-        task = task_store.get(task_id)
+        task = task_manager.get_status(task_id)
         if not task:
             return jsonify({"error": "任务不存在"}), 404
         docx_path = task.get("docx_path")
@@ -45,25 +45,16 @@ def register_report_routes(app, deps):
     @report_bp.route('/api/history', methods=['GET'])
     def history():
         """列出所有已完成（非 processing 状态）的任务"""
-        items = []
-        for tid, t in task_store.items():
-            if t.get("status") != "processing":
-                items.append({
-                    "task_id": tid,
-                    "status": t.get("status"),
-                    "auto_mode": t.get("auto_mode"),
-                    "created_at": t.get("created_at"),
-                    "report": t.get("final_report"),
-                    "docx_ready": bool(t.get("docx_path")),
-                })
+        items = task_manager.list_history()
         return jsonify({"tasks": items})
 
     @report_bp.route('/api/history/<task_id>', methods=['DELETE'])
     def delete_history(task_id):
-        """从 task_store 中删除指定任务"""
-        if task_id not in task_store:
+        """从持久化存储中删除指定任务"""
+        task = task_manager.get_status(task_id)
+        if not task:
             return jsonify({"error": "任务不存在"}), 404
-        del task_store[task_id]
+        task_manager.delete_task(task_id)
         return jsonify({"status": "ok"})
 
     app.register_blueprint(report_bp)

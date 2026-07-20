@@ -14,8 +14,7 @@ from services.paper_api import ALL_SOURCES
 upload_bp = Blueprint('upload', __name__)
 
 
-def register_upload_routes(app, deps):
-    AGENTS_CONFIG = deps.get('AGENTS_CONFIG', {})
+def register_upload_routes(app, agents_config: dict):
 
     @upload_bp.route('/api/upload', methods=['POST'])
     def upload_file():
@@ -64,7 +63,7 @@ def register_upload_routes(app, deps):
             return jsonify({"error": "论文内容不能为空"}), 400
 
         try:
-            agent1_cfg = AGENTS_CONFIG.get("agent1", {})
+            agent1_cfg = agents_config.get("agent1", {})
             agent1 = create_agent("agent1", agent1_cfg)
             result = agent1.think(paper_text)
             inner = result.get("result", {})

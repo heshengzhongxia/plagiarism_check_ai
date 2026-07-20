@@ -19,7 +19,7 @@ from cnki_spider import cnki_tasks, run_spider
 cnki_bp = Blueprint('cnki', __name__)
 
 
-def register_cnki_routes(app, deps):
+def register_cnki_routes(app):
 
     @cnki_bp.route('/api/cnki/start', methods=['POST'])
     def cnki_start():
