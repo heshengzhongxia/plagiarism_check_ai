@@ -1,11 +1,20 @@
+import TopNavBar from './components/Layout/TopNavBar'
+import MainLayout from './components/Layout/MainLayout'
+import LeftPanel from './components/Layout/LeftPanel'
+import CenterPanel from './components/Layout/CenterPanel'
+import RightPanel from './components/Layout/RightPanel'
+
 function App() {
   return (
-    <div className="flex items-center justify-center h-screen">
-      <h1 className="text-2xl font-bold text-[var(--text)]">
-        六智Agent论文工坊
-      </h1>
+    <div className="flex flex-col h-screen">
+      <TopNavBar />
+      <MainLayout>
+        <LeftPanel />
+        <CenterPanel />
+        <RightPanel />
+      </MainLayout>
     </div>
-  )
+  );
 }
 
 export default App
