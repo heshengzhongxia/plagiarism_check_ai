@@ -26,18 +26,11 @@ REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 task_store = {}
-task_counter = 0
+task_counter = [0]  # wrapped in list for mutable sharing via deps
 task_lock = threading.Lock()
 
 
-def _add_message(task_id, msg):
-    if task_id in task_store:
-        task_store[task_id]["conversation"].append(msg)
-
-
-def _system_msg(message, emoji="⚙️"):
-    return {"agent_id": "system", "agent_name": "系统", "emoji": emoji,
-            "color": "#7b8ca8", "message": message, "timestamp": time.time()}
+from services.message_utils import add_message, system_msg
 
 
 # ============================================================
@@ -62,7 +55,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
         try:
             agents[aid] = create_agent(aid, AGENTS_CONFIG[aid])
         except Exception as e:
-            _add_message(task_id, _system_msg(f"Agent {aid} 初始化失败: {e}", "❌"))
+            add_message(task_store, task_id, system_msg(f"Agent {aid} 初始化失败: {e}", "❌"))
             task_store[task_id]["status"] = "error"
             return
 
@@ -71,11 +64,11 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
     # ===== Agent1: 解析论文 =====
     _update(task, "agent1", "运行中", 0)
-    _add_message(task_id, _system_msg(f"{agents['agent1'].emoji} {agents['agent1'].name}（{agents['agent1'].role}）开始工作 · 预计 5~15s", "➡️"))
-    _add_message(task_id, {"agent_id":"agent1","agent_name":agents['agent1'].name,"emoji":agents['agent1'].emoji,"color":agents['agent1'].color,"message":"正在解析论文...","timestamp":time.time()})
+    add_message(task_store, task_id, system_msg(f"{agents['agent1'].emoji} {agents['agent1'].name}（{agents['agent1'].role}）开始工作 · 预计 5~15s", "➡️"))
+    add_message(task_store, task_id, {"agent_id":"agent1","agent_name":agents['agent1'].name,"emoji":agents['agent1'].emoji,"color":agents['agent1'].color,"message":"正在解析论文...","timestamp":time.time()})
 
     r1 = agents["agent1"].think(paper_text)
-    for m in r1.get("messages", []): _add_message(task_id, m)
+    for m in r1.get("messages", []): add_message(task_store, task_id, m)
     agent_results["agent1"] = r1["result"]
     _update(task, "agent1", "完成", 100)
 
@@ -88,7 +81,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
     # ===== Agent2: 检索论文 ====
     _update(task, "agent2", "运行中", 0)
-    _add_message(task_id, _system_msg(f"{agents['agent2'].emoji} {agents['agent2'].name}（{agents['agent2'].role}）开始工作 · 预计 10~20s", "➡️"))
+    add_message(task_store, task_id, system_msg(f"{agents['agent2'].emoji} {agents['agent2'].name}（{agents['agent2'].role}）开始工作 · 预计 10~20s", "➡️"))
 
     # 真实API搜索
     sources = task.get("sources", list(ALL_SOURCES.keys()))
@@ -96,11 +89,11 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
     search_kw = [obj] + keywords[:5] if obj else keywords[:5]
     search_kw = [k for k in search_kw if k and len(k) >= 2]
 
-    _add_message(task_id, _system_msg(f"检索: {', '.join(search_kw[:5])}，从 {len(sources)} 个论文库...", "📡"))
+    add_message(task_store, task_id, system_msg(f"检索: {', '.join(search_kw[:5])}，从 {len(sources)} 个论文库...", "📡"))
     api_result = search_all(search_kw, sources=sources, max_per_source=5)
     task["real_papers"] = api_result
     by_src = ', '.join(f'{ALL_SOURCES.get(s,{}).get("name",s)}:{c}' for s, c in api_result["by_source"].items() if c > 0)
-    _add_message(task_id, _system_msg(f"API完成：{api_result['total']} 篇（{by_src}）", "✅"))
+    add_message(task_store, task_id, system_msg(f"API完成：{api_result['total']} 篇（{by_src}）", "✅"))
 
     # ---- 知网上传论文（用户F12下载后上传的PDF）----
     cnki_papers_upload = task.get("cnki_papers", []) if task else []
@@ -108,14 +101,14 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
         api_result["papers"].extend(cnki_papers_upload)
         api_result["total"] += len(cnki_papers_upload)
         api_result["by_source"]["cnki"] = len(cnki_papers_upload)
-        _add_message(task_id, _system_msg(
+        add_message(task_store, task_id, system_msg(
             f"知网上传论文：已加入 {len(cnki_papers_upload)} 篇全文", "✅"
         ))
 
     # ---- 知网：解析用户粘贴的检索结果页HTML ----
     cnki_html = task.get("cnki_html", "") if task else ""
     if cnki_html:
-        _add_message(task_id, _system_msg("正在解析知网检索结果页...", "📚"))
+        add_message(task_store, task_id, system_msg("正在解析知网检索结果页...", "📚"))
         try:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(cnki_html, 'html.parser')
@@ -146,16 +139,16 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
                 api_result["papers"].extend(unique[:15])
                 api_result["total"] += len(unique[:15])
                 api_result["by_source"]["cnki"] = len(unique[:15])
-                _add_message(task_id, _system_msg(
+                add_message(task_store, task_id, system_msg(
                     f"知网解析完成：提取 {len(unique[:15])} 篇论文摘要", "✅"
                 ))
             else:
-                _add_message(task_id, _system_msg("知网HTML未提取到论文，请确认复制的是检索结果页内容", "⚠️"))
+                add_message(task_store, task_id, system_msg("知网HTML未提取到论文，请确认复制的是检索结果页内容", "⚠️"))
         except Exception as e:
-            _add_message(task_id, _system_msg(f"知网解析失败: {e}", "⚠️"))
+            add_message(task_store, task_id, system_msg(f"知网解析失败: {e}", "⚠️"))
 
     r2 = agents["agent2"].think({"keywords": keywords}, context={"real_papers": api_result})
-    for m in r2.get("messages", []): _add_message(task_id, m)
+    for m in r2.get("messages", []): add_message(task_store, task_id, m)
     agent_results["agent2"] = r2["result"]
     _update(task, "agent2", "完成", 100)
 
@@ -166,7 +159,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
     # ===== Agent3: 逐句查重比对 ====
     _update(task, "agent3", "运行中", 0)
-    _add_message(task_id, _system_msg(f"{agents['agent3'].emoji} {agents['agent3'].name}（{agents['agent3'].role}）开始工作 · 预计 5~15s", "➡️"))
+    add_message(task_store, task_id, system_msg(f"{agents['agent3'].emoji} {agents['agent3'].name}（{agents['agent3'].role}）开始工作 · 预计 5~15s", "➡️"))
 
     agent3_input = {
         "user_full_text": user_full_text,
@@ -174,7 +167,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
         "threshold": threshold,
     }
     r3 = agents["agent3"].think(agent3_input)
-    for m in r3.get("messages", []): _add_message(task_id, m)
+    for m in r3.get("messages", []): add_message(task_store, task_id, m)
     agent_results["agent3"] = r3["result"]
     _update(task, "agent3", "完成", 100)
 
@@ -182,7 +175,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
     total_matches = len(matches)
 
     if total_matches == 0:
-        _add_message(task_id, _system_msg("未发现重复句子，跳过后续分析", "✅"))
+        add_message(task_store, task_id, system_msg("未发现重复句子，跳过后续分析", "✅"))
         agent_results["agent4"] = {"sentence_directions": [], "overall_suggestions": []}
         agent_results["agent5"] = {"modifications": [], "overall_suggestions": []}
         agent_results["agent6"] = {"summary": "未检测到重复", "total_matches": 0, "docx_path": None}
@@ -203,7 +196,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
     BATCH_SIZE = 10
     total_batches = (total_matches + BATCH_SIZE - 1) // BATCH_SIZE
-    _add_message(task_id, _system_msg(f"共 {total_matches} 处重复，分 {total_batches} 批处理（每批 {BATCH_SIZE} 条）", "📦"))
+    add_message(task_store, task_id, system_msg(f"共 {total_matches} 处重复，分 {total_batches} 批处理（每批 {BATCH_SIZE} 条）", "📦"))
 
     all_directions = []
     all_modifications = []
@@ -217,7 +210,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
         batch_matches = _all_matches[start:end]
 
-        _add_message(task_id, _system_msg(
+        add_message(task_store, task_id, system_msg(
             f"📦 批次 {batch_num}/{total_batches}（{start+1}-{end}）开始处理 · 进度 {progress_pct}%"
         ))
         task["batch_progress"] = f"{batch_num}/{total_batches}"
@@ -225,9 +218,9 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
         # ---- Agent4 ----
         _update(task, "agent4", "运行中", progress_pct)
-        _add_message(task_id, {"agent_id":"agent4","agent_name":agents['agent4'].name,"emoji":agents['agent4'].emoji,"color":agents['agent4'].color,"message":f"批次{batch_num}：分析 {len(batch_matches)} 句修改方向...","timestamp":time.time()})
+        add_message(task_store, task_id, {"agent_id":"agent4","agent_name":agents['agent4'].name,"emoji":agents['agent4'].emoji,"color":agents['agent4'].color,"message":f"批次{batch_num}：分析 {len(batch_matches)} 句修改方向...","timestamp":time.time()})
         r4 = agents["agent4"].think({"matches": batch_matches})
-        for m in r4.get("messages", []): _add_message(task_id, m)
+        for m in r4.get("messages", []): add_message(task_store, task_id, m)
         _update(task, "agent4", "完成", progress_pct)
 
         batch_dirs = r4["result"].get("sentence_directions", [])
@@ -241,18 +234,18 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
         # ---- Agent5 ----
         _update(task, "agent5", "运行中", progress_pct)
-        _add_message(task_id, {"agent_id":"agent5","agent_name":agents['agent5'].name,"emoji":agents['agent5'].emoji,"color":agents['agent5'].color,"message":f"批次{batch_num}：生成 {len(batch_dirs)} 句修改方案...","timestamp":time.time()})
+        add_message(task_store, task_id, {"agent_id":"agent5","agent_name":agents['agent5'].name,"emoji":agents['agent5'].emoji,"color":agents['agent5'].color,"message":f"批次{batch_num}：生成 {len(batch_dirs)} 句修改方案...","timestamp":time.time()})
         r5 = agents["agent5"].think({
             "sentence_directions": batch_dirs,
             "overall_suggestions": batch_sug,
         })
-        for m in r5.get("messages", []): _add_message(task_id, m)
+        for m in r5.get("messages", []): add_message(task_store, task_id, m)
         _update(task, "agent5", "完成", progress_pct)
 
         batch_mods = r5["result"].get("modifications", [])
         all_modifications.extend(batch_mods)
 
-        _add_message(task_id, _system_msg(
+        add_message(task_store, task_id, system_msg(
             f"✅ 批次 {batch_num}/{total_batches} 完成"
         ))
         task["batch_progress"] = f"{batch_num}/{total_batches}"
@@ -260,7 +253,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
 
     # ---- Agent6: 汇总生成报告 ----
     _update(task, "agent6", "运行中", 95)
-    _add_message(task_id, _system_msg(f"{agents['agent6'].emoji} {agents['agent6'].name} 汇总 {total_matches} 条匹配，生成报告 · 预计 5~10s", "➡️"))
+    add_message(task_store, task_id, system_msg(f"{agents['agent6'].emoji} {agents['agent6'].name} 汇总 {total_matches} 条匹配，生成报告 · 预计 5~10s", "➡️"))
 
     agent6_input = {
         "user_full_text": user_full_text,
@@ -271,7 +264,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
         "aigc_analysis": agent_results["agent1"].get("aigc_analysis", ""),
     }
     r6 = agents["agent6"].think(agent6_input, context={"report_dir": REPORTS_DIR})
-    for m in r6.get("messages", []): _add_message(task_id, m)
+    for m in r6.get("messages", []): add_message(task_store, task_id, m)
     agent_results["agent6"] = r6["result"]
     _update(task, "agent6", "完成", 100)
 
@@ -281,7 +274,7 @@ def execute_pipeline(task_id, paper_text, auto_mode, threshold=60):
     task["docx_path"] = agent_results["agent6"].get("docx_path")
     task["status"] = "completed"
     task["current_agent"] = 0
-    _add_message(task_id, _system_msg("所有Agent协作完成！查重报告已生成。", "✅"))
+    add_message(task_store, task_id, system_msg("所有Agent协作完成！查重报告已生成。", "✅"))
 
 
 def _update(task, agent_id, status, progress):
@@ -296,7 +289,7 @@ def _wait_confirm(task_id, agent_id):
     """手动模式下等待用户确认"""
     task_store[task_id]["paused"] = True
     task_store[task_id]["needs_confirm"] = True
-    _add_message(task_id, {"agent_id":"system","agent_name":"系统","emoji":"⏸️","color":"#f0c060",
+    add_message(task_store, task_id, {"agent_id":"system","agent_name":"系统","emoji":"⏸️","color":"#f0c060",
         "message":f"手动模式：请检查 {agent_id} 的结果，点击确认继续。","timestamp":time.time(),
         "needs_confirm":True})
     while True:
@@ -317,7 +310,6 @@ _deps = {
     "task_counter": task_counter,
     "REPORTS_DIR": REPORTS_DIR,
     "AGENTS_CONFIG": AGENTS_CONFIG,
-    "sse_broker": None,  # task_routes imports the global directly
     "pipeline_fn": execute_pipeline,
 }
 register_routes(app, _deps)
