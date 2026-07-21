@@ -25,7 +25,7 @@
 
 ## 截图
 
-![主界面](docs/screenshot.png)
+![主界面](papersearch/docs/screenshot.png)
 
 ## 功能特性
 
