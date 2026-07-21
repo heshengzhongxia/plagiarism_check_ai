@@ -23,6 +23,10 @@
 
 **DAG 数据流：** agent1 → (agent2, agent3, agent6) || agent2 → agent3 → (agent4, agent6) || agent4 → agent5 → agent6
 
+## 截图
+
+![主界面](docs/screenshot.png)
+
 ## 功能特性
 
 - 🤖 **6 Agent 协作** — 每个 Agent 专注于一个子任务，通过 DAG 流水线协作
