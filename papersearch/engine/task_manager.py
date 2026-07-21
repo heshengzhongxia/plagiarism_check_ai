@@ -128,16 +128,38 @@ class TaskManager:
     def list_history(self, limit: int = 50) -> list[dict]:
         """Return recent tasks with essential summary fields."""
         tasks = self._repo.list_tasks(limit)
-        return [
-            {
+        result = []
+        for t in tasks:
+            # Parse final_report JSON if stored as string
+            raw_report = t.get("final_report")
+            if raw_report and isinstance(raw_report, str):
+                try:
+                    raw_report = json.loads(raw_report)
+                except (json.JSONDecodeError, TypeError):
+                    raw_report = None
+
+            # Parse agent_results to extract total_matches
+            raw_results = t.get("agent_results")
+            total_matches = None
+            if raw_results and isinstance(raw_results, str):
+                try:
+                    parsed = json.loads(raw_results)
+                    total_matches = parsed.get("agent6", {}).get("total_matches")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            result.append({
                 "task_id": t["id"],
                 "status": t["status"],
+                "auto_mode": bool(t.get("auto_mode", 1)),
                 "paper_title": t.get("paper_title"),
+                "total_matches": total_matches,
+                "report": raw_report,
+                "docx_ready": bool(t.get("docx_path")),
                 "created_at": t["created_at"],
                 "updated_at": t["updated_at"],
-            }
-            for t in tasks
-        ]
+            })
+        return result
 
     def update_task(self, task_id: str, **kwargs) -> None:
         """Update arbitrary columns on a task row.

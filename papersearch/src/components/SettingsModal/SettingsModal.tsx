@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+const API_BASE = 'http://localhost:5001';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,13 +17,43 @@ const ALL_SOURCES = [
   { key: 'pubmed', name: 'PubMed' },
 ];
 
+const AGENT_NAMES = ['深析·奥利', '猎手·艾瑞', '校验·维拉', '解构·雷欧', '智囊·赛诺', '整合·尤娜'];
+
 function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [allSame, setAllSame] = useState(false);
   const [masterKey, setMasterKey] = useState('');
   const [keys, setKeys] = useState<string[]>(Array(6).fill(''));
+  const [keysMasked, setKeysMasked] = useState<string[]>(Array(6).fill(''));
   const [sources, setSources] = useState<Set<string>>(new Set(ALL_SOURCES.map((s) => s.key)));
   const [threshold, setThreshold] = useState(60);
   const [batchSize, setBatchSize] = useState(10);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  // 挂载时从后端加载已保存的 Key
+  useEffect(() => {
+    if (!isOpen || loaded) return;
+    fetch(`${API_BASE}/api/settings`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.any_key) {
+          setKeys(data.keys || Array(6).fill(''));
+          setKeysMasked(data.keys_masked || Array(6).fill(''));
+        }
+        // 恢复前端设置
+        const local = localStorage.getItem('papersearch-settings');
+        if (local) {
+          try {
+            const s = JSON.parse(local);
+            if (s.sources) setSources(new Set(s.sources));
+            if (s.threshold) setThreshold(s.threshold);
+            if (s.batchSize) setBatchSize(s.batchSize);
+          } catch {}
+        }
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -49,16 +81,33 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setSources(next);
   };
 
-  const handleSave = () => {
-    // In the full Electron app, settings would be persisted via IPC.
-    // For now, store in localStorage as a temporary solution.
-    localStorage.setItem('papersearch-settings', JSON.stringify({
-      keys,
-      sources: Array.from(sources),
-      threshold,
-      batchSize,
-    }));
-    onClose();
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // 发送到后端
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setKeysMasked(data.keys_masked || []);
+      }
+
+      // 前端 localStorage
+      localStorage.setItem('papersearch-settings', JSON.stringify({
+        sources: Array.from(sources),
+        threshold,
+        batchSize,
+      }));
+
+      onClose();
+    } catch (e) {
+      console.error('保存设置失败:', e);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -67,12 +116,7 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <h2 className="text-lg font-semibold text-[var(--text)]">⚙️ 设置</h2>
-          <button
-            onClick={onClose}
-            className="text-[var(--muted)] hover:text-[var(--text)] text-lg transition-colors"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} className="text-[var(--muted)] hover:text-[var(--text)] text-lg transition-colors">✕</button>
         </div>
 
         {/* Body */}
@@ -81,13 +125,7 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <section>
             <h3 className="text-sm font-semibold text-[var(--text)] mb-3">🤖 Agent API Keys</h3>
             <div className="flex items-center gap-2 mb-3">
-              <input
-                type="checkbox"
-                id="allSame"
-                checked={allSame}
-                onChange={handleAllSameToggle}
-                className="rounded"
-              />
+              <input type="checkbox" id="allSame" checked={allSame} onChange={handleAllSameToggle} className="rounded" />
               <label htmlFor="allSame" className="text-xs text-[var(--muted)]">
                 所有 Agent 使用相同 API Key
               </label>
@@ -102,7 +140,7 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               />
             ) : (
               <div className="space-y-2">
-                {['深析·奥利', '猎手·艾瑞', '校验·维拉', '解构·雷欧', '智囊·赛诺', '整合·尤娜'].map((name, i) => (
+                {AGENT_NAMES.map((name, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <span className="text-xs text-[var(--muted)] w-24 shrink-0">Agent {i + 1}</span>
                     <input
@@ -113,7 +151,7 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         next[i] = e.target.value;
                         setKeys(next);
                       }}
-                      placeholder={`${name} 的 API Key`}
+                      placeholder={keysMasked[i] ? `已保存: ${keysMasked[i]}` : `${name} 的 API Key`}
                       className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--bg)]/50 border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                     />
                   </div>
@@ -130,17 +168,10 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <label
                   key={s.key}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-                    sources.has(s.key)
-                      ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                      : 'border-[var(--border)] bg-[var(--bg)]/30'
+                    sources.has(s.key) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--bg)]/30'
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={sources.has(s.key)}
-                    onChange={() => handleSourceToggle(s.key)}
-                    className="rounded"
-                  />
+                  <input type="checkbox" checked={sources.has(s.key)} onChange={() => handleSourceToggle(s.key)} className="rounded" />
                   <span className="text-sm text-[var(--text)]">{s.name}</span>
                 </label>
               ))}
@@ -152,47 +183,21 @@ function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <h3 className="text-sm font-semibold text-[var(--text)] mb-3">
               🎯 相似度阈值: <span className="text-[var(--accent)]">{threshold}%</span>
             </h3>
-            <input
-              type="range"
-              min={40}
-              max={90}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-              className="w-full accent-[var(--accent)]"
-            />
-            <div className="flex justify-between text-xs text-[var(--muted)] mt-1">
-              <span>40%</span>
-              <span>90%</span>
-            </div>
+            <input type="range" min={40} max={90} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
           </section>
 
           {/* Batch Size */}
           <section>
             <h3 className="text-sm font-semibold text-[var(--text)] mb-3">📦 批处理大小</h3>
-            <input
-              type="number"
-              min={5}
-              max={20}
-              value={batchSize}
-              onChange={(e) => setBatchSize(Number(e.target.value))}
-              className="w-24 px-3 py-2 rounded-xl bg-[var(--bg)]/50 border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            />
+            <input type="number" min={5} max={20} value={batchSize} onChange={(e) => setBatchSize(Number(e.target.value))} className="w-24 px-3 py-2 rounded-xl bg-[var(--bg)]/50 border border-[var(--border)] text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]" />
           </section>
         </div>
 
         {/* Footer */}
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-[var(--border)]">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded-xl bg-[var(--card)]/50 text-[var(--muted)] hover:bg-[var(--card)]/80 transition-colors border border-[var(--border)]"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-5 py-2 text-sm rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent)]/80 transition-colors font-medium"
-          >
-            保存设置
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-xl bg-[var(--card)]/50 text-[var(--muted)] hover:bg-[var(--card)]/80 transition-colors border border-[var(--border)]">取消</button>
+          <button onClick={handleSave} disabled={saving} className="px-5 py-2 text-sm rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent)]/80 transition-colors font-medium disabled:opacity-50">
+            {saving ? '保存中...' : '保存设置'}
           </button>
         </div>
       </div>

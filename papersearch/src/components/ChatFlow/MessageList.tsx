@@ -5,6 +5,7 @@ import SystemMessage from './SystemMessage';
 
 function MessageList() {
   const conversation = useAppStore((s) => s.conversation);
+  const taskStatus = useAppStore((s) => s.taskStatus);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -16,7 +17,9 @@ function MessageList() {
       {conversation.length === 0 && (
         <div className="flex items-center justify-center h-full">
           <p className="text-sm text-[var(--muted)]">
-            上传论文并开始分析，Agent 对话将在这里实时显示。
+            {taskStatus === 'processing' || taskStatus === 'paused'
+              ? '⏳ 分析已启动，等待 Agent 响应...'
+              : '上传论文并开始分析，Agent 对话将在这里实时显示。'}
           </p>
         </div>
       )}

@@ -33,7 +33,7 @@ function UploadModal({ isOpen, onClose, onTextReady }: UploadModalProps) {
       if (data.error) {
         setError(data.error);
       } else {
-        setExtractedText(data.paper || '');
+        setExtractedText(data.text || '');
       }
     } catch (e) {
       setError('上传失败，请检查后端服务是否运行。');
@@ -153,7 +153,7 @@ function UploadModal({ isOpen, onClose, onTextReady }: UploadModalProps) {
               onClick={() => onTextReady(extractedText)}
               className="px-5 py-2 text-sm rounded-xl bg-[var(--accent)] text-white hover:bg-[var(--accent)]/80 transition-colors font-medium"
             >
-              使用此文本
+              🚀 开始分析
             </button>
           </div>
         )}

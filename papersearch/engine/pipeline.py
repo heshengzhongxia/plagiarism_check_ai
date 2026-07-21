@@ -18,11 +18,32 @@ _runtime_lock = threading.Lock()
 
 
 def _get_runtime(task_id: str) -> dict:
-    """获取或创建任务的运行时状态"""
+    """获取或创建任务的运行时状态（返回引用，调用方须在锁内完成操作）"""
     with _runtime_lock:
         if task_id not in _runtime_state:
             _runtime_state[task_id] = {}
         return _runtime_state[task_id]
+
+
+def get_runtime_value(task_id: str, key: str, default=None):
+    """线程安全地读取运行时状态中的单个键。"""
+    with _runtime_lock:
+        rt = _runtime_state.get(task_id, {})
+        return rt.get(key, default)
+
+
+def set_runtime_value(task_id: str, key: str, value) -> None:
+    """线程安全地设置运行时状态中的单个键。"""
+    with _runtime_lock:
+        if task_id not in _runtime_state:
+            _runtime_state[task_id] = {}
+        _runtime_state[task_id][key] = value
+
+
+def remove_runtime(task_id: str) -> None:
+    """线程安全地移除任务的运行时状态。"""
+    with _runtime_lock:
+        _runtime_state.pop(task_id, None)
 
 
 # ---------------------------------------------------------------------------

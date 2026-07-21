@@ -17,12 +17,15 @@ from services.message_utils import system_msg
 
 task_bp = Blueprint('task', __name__)
 
-# 简单的任务计数器（用于生成 task_id）
+# 简单的任务计数器（用于生成 task_id）— 线程安全
 _task_counter = [0]
+_counter_lock = threading.Lock()
 
 
 def register_task_routes(app, task_manager, sse_broker, agents_config,
-                         pipeline_fn, runtime_state: dict, reports_dir: str):
+                         pipeline_fn, runtime_state: dict,
+                         get_rv, set_rv, remove_rv,
+                         reports_dir: str):
     """注册任务相关路由。
 
     Args:
@@ -32,6 +35,9 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
         agents_config: Agent 配置。
         pipeline_fn: 流水线执行函数（来自 engine.pipeline）。
         runtime_state: 运行时瞬态状态字典（暂停/确认等）。
+        get_rv: 线程安全读取函数 get_runtime_value。
+        set_rv: 线程安全写入函数 set_runtime_value。
+        remove_rv: 线程安全删除函数 remove_runtime。
         reports_dir: 报告输出目录。
     """
 
@@ -49,8 +55,9 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
         if not paper_text:
             return jsonify({"error": "论文内容不能为空"}), 400
 
-        _task_counter[0] += 1
-        task_id = f"task_{_task_counter[0]}"
+        with _counter_lock:
+            _task_counter[0] += 1
+            task_id = f"task_{_task_counter[0]}"
 
         # 持久化任务
         task_manager.create_task(task_id, {
@@ -58,8 +65,8 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
             "threshold": threshold,
         })
 
-        # 初始化运行时状态（瞬态字段）
-        runtime_state[task_id] = {
+        # 初始化运行时状态（瞬态字段）— 线程安全
+        init_keys = {
             "paused": False,
             "needs_confirm": False,
             "current_agent": 0,
@@ -69,6 +76,8 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
             "cnki_papers": cnki_papers_upload,
             "real_papers": None,
         }
+        for k, v in init_keys.items():
+            set_rv(task_id, k, v)
 
         task_manager.add_message(task_id, system_msg(
             f"论文分析任务已创建，{'自动' if auto_mode else '手动'}流转模式，相似度阈值{threshold}%", "🚀"))
@@ -90,8 +99,6 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
         if not task:
             return jsonify({"error": "任务不存在"}), 404
 
-        rt = runtime_state.get(task_id, {})
-
         since = request.args.get('since', 0, type=int)
         messages = task_manager.get_messages(task_id, since)
         total_messages = len(task_manager.get_messages(task_id, 0))
@@ -100,9 +107,9 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
             "task_id": task_id,
             "status": task.get("status"),
             "auto_mode": task.get("auto_mode"),
-            "paused": rt.get("paused", False),
-            "needs_confirm": rt.get("needs_confirm", False),
-            "current_agent": rt.get("current_agent", 0),
+            "paused": get_rv(task_id, "paused", False),
+            "needs_confirm": get_rv(task_id, "needs_confirm", False),
+            "current_agent": get_rv(task_id, "current_agent", 0),
             "agents_status": task.get("agents_status", {}),
             "conversation": messages,
             "total_messages": total_messages,
@@ -138,20 +145,20 @@ def register_task_routes(app, task_manager, sse_broker, agents_config,
 
     @task_bp.route('/api/confirm/<task_id>', methods=['POST'])
     def confirm_agent(task_id):
-        if task_id not in runtime_state:
+        if get_rv(task_id, "paused", None) is None:
             return jsonify({"error": "任务不存在"}), 404
-        runtime_state[task_id]["paused"] = False
-        runtime_state[task_id]["needs_confirm"] = False
+        set_rv(task_id, "paused", False)
+        set_rv(task_id, "needs_confirm", False)
         task_manager.add_message(task_id, system_msg("用户已确认", "▶️"))
         return jsonify({"status": "ok"})
 
     @task_bp.route('/api/retry/<task_id>', methods=['POST'])
     def retry_agent(task_id):
-        if task_id not in runtime_state:
+        if get_rv(task_id, "paused", None) is None:
             return jsonify({"error": "任务不存在"}), 404
-        runtime_state[task_id]["retry_requested"] = True
-        runtime_state[task_id]["paused"] = False
-        runtime_state[task_id]["needs_confirm"] = False
+        set_rv(task_id, "retry_requested", True)
+        set_rv(task_id, "paused", False)
+        set_rv(task_id, "needs_confirm", False)
         task_manager.add_message(task_id, system_msg("用户要求重新处理", "🔄"))
         return jsonify({"status": "ok"})
 

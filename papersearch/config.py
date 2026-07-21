@@ -10,7 +10,19 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 加载 .env 文件（覆盖已存在的环境变量）
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+# 优先级：exe 同级目录（打包后）> config.py 同级目录（开发模式）
+_env_candidates = [
+    os.path.join(os.path.dirname(BASE_DIR), ".env"),   # exe 旁边（打包后）
+    os.path.join(BASE_DIR, ".env"),                    # config.py 旁边（开发/打包）
+]
+_env_loaded = False
+for _env_path in _env_candidates:
+    if os.path.isfile(_env_path):
+        load_dotenv(_env_path, override=True)
+        _env_loaded = True
+        break
+if not _env_loaded:
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 # ---------------------------------------------------------------------------
 # 常量

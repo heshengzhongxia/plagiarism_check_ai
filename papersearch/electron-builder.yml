@@ -1,24 +1,51 @@
 appId: com.papersearch.agent-workshop
 productName: 六智Agent论文工坊
 directories:
-  output: dist-electron
-  buildResources: build
+  output: release
 files:
-  - dist/**/*
-  - electron/**/*.js
-  - papersearch/**/*.py
-  - papersearch/**/*.txt
-  - papersearch/**/*.sql
+  - dist-electron/**/*.cjs
+  - package.json
 extraResources:
-  - from: ../python-embedded
-    to: python
+  - from: dist
+    to: dist
+  - from: app.py
+    to: app.py
+  - from: config.py
+    to: config.py
+  - from: cnki_spider.py
+    to: cnki_spider.py
+  - from: keyword_extractor.py
+    to: keyword_extractor.py
+  - from: llm_client.py
+    to: llm_client.py
+  - from: agents
+    to: agents
     filter:
       - "**/*"
+      - "!__pycache__/**"
+  - from: engine
+    to: engine
+    filter:
+      - "**/*"
+      - "!__pycache__/**"
+  - from: routes
+    to: routes
+    filter:
+      - "**/*"
+      - "!__pycache__/**"
+  - from: services
+    to: services
+    filter:
+      - "**/*"
+      - "!__pycache__/**"
+  - from: store
+    to: store
+    filter:
+      - "**/*"
+      - "!__pycache__/**"
+      - "!*.db"
+      - "!*.db-shm"
+      - "!*.db-wal"
+electronDist: node_modules/electron/dist
 win:
-  target: nsis
-  icon: build/icon.ico
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  shortcutName: 六智Agent论文工坊
+  target: portable

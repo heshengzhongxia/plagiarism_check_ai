@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -12,7 +12,7 @@
     "dev:electron": "wait-on http://localhost:5001 && electron .",
     "dev:full": "concurrently \"python app.py\" \"npm run dev:react\"",
     "build:react": "tsc -b && vite build",
-    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:electron": "tsc -p electron/tsconfig.json && node -e \"var fs=require('fs');['main','preload','python-manager'].forEach(function(f){fs.renameSync('dist-electron/'+f+'.js','dist-electron/'+f+'.cjs')})\" && node -e \"var fs=require('fs');var c=fs.readFileSync('dist-electron/main.cjs','utf8');c=c.replace('require(\\\"./python-manager\\\")','require(\\\"./python-manager.cjs\\\")');c=c.replace(\\\"'preload.js'\\\",\\\"'preload.cjs'\\\");fs.writeFileSync('dist-electron/main.cjs',c)\"",
     "build:full": "npm run build:react && npm run build:electron",
     "dist": "npm run build:full && electron-builder"
   },
@@ -28,7 +28,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "concurrently": "^9.0.0",
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^25.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.6.0",

@@ -11,6 +11,29 @@ export function useSSE(taskId: string | null) {
   useEffect(() => {
     if (!taskId) return;
 
+    // 先拉取当前状态，避免 SSE 连接前任务已跑完的竞态
+    fetch(`${API_BASE}/api/status/${taskId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.status === 'completed') {
+          store.setTaskStatus('completed');
+          if (data.report) {
+            store.setReport(data.report);
+            // 从 agent_results 中提取 modifications
+            if (data.report.modifications) {
+              store.setModifications(data.report.modifications);
+            }
+          }
+          store.setDocxReady(data.docx_ready || false);
+          return; // 任务已完成，无需建立 SSE
+        }
+        if (data.status === 'error') {
+          store.setTaskStatus('error');
+          return;
+        }
+      })
+      .catch(() => {});
+
     const es = new EventSource(`${API_BASE}/api/stream/${taskId}`);
     eventSourceRef.current = es;
 
@@ -61,6 +84,10 @@ export function useSSE(taskId: string | null) {
       store.setTaskStatus('completed');
       store.setReport(report);
       store.setDocxReady(docx_ready);
+      // 设置修改方案
+      if (report?.modifications) {
+        store.setModifications(report.modifications);
+      }
     });
 
     es.addEventListener('task_error', (e) => {
@@ -73,7 +100,6 @@ export function useSSE(taskId: string | null) {
     });
 
     es.onerror = () => {
-      // EventSource will auto-reconnect
       setTimeout(() => {
         if (es.readyState === EventSource.CLOSED) {
           store.setBackendStatus('error');

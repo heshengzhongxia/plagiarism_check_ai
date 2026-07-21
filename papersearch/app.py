@@ -14,12 +14,21 @@ from routes import register_routes
 from engine.task_manager import TaskManager
 from engine.sse_broker import sse_broker
 
-app = Flask(__name__, static_folder='.')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DIST_DIR = os.path.join(BASE_DIR, "dist")
+
+# 如果有 React 构建产物，用它作为静态文件目录；否则回退到当前目录
+if os.path.isdir(DIST_DIR) and os.path.isfile(os.path.join(DIST_DIR, "index.html")):
+    STATIC_DIR = DIST_DIR
+else:
+    STATIC_DIR = BASE_DIR  # 开发模式，Vite 在另一个端口运行
+
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 CORS(app)
 
 task_manager = TaskManager(DB_PATH)
 
-REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 register_routes(app, task_manager, sse_broker, AGENTS_CONFIG, REPORTS_DIR)
@@ -31,8 +40,18 @@ def health():
 
 
 @app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
+def serve_react():
+    """返回 React SPA 入口。Electron 桌面应用由此加载。"""
+    if os.path.isfile(os.path.join(STATIC_DIR, "index.html")):
+        return send_from_directory(STATIC_DIR, "index.html")
+    return send_from_directory(BASE_DIR, "index.html")
+
+
+@app.route('/assets/<path:filename>')
+def serve_assets(filename):
+    """返回 Vite 构建的 JS/CSS 等资源"""
+    assets_dir = os.path.join(STATIC_DIR, "assets")
+    return send_from_directory(assets_dir, filename)
 
 
 if __name__ == '__main__':

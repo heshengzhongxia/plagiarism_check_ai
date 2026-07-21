@@ -24,7 +24,7 @@ function HistoryDrawer({ isOpen, onClose }: HistoryDrawerProps) {
     setLoading(true);
     fetch(`${API_BASE}/api/history`)
       .then((r) => r.json())
-      .then((data) => setHistory(data.history || []))
+      .then((data) => setHistory(data.tasks || []))
       .catch(() => setHistory([]))
       .finally(() => setLoading(false));
   }, [isOpen]);

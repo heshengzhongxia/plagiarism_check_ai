@@ -19,10 +19,15 @@ def register_routes(app: Flask, task_manager, sse_broker, agents_config: dict,
     from .task_routes import register_task_routes
     from .report_routes import register_report_routes
     from .cnki_routes import register_cnki_routes
-    from engine.pipeline import execute_pipeline, _runtime_state
+    from .settings_routes import settings_bp
+    from engine.pipeline import (execute_pipeline, _runtime_state,
+                                  get_runtime_value, set_runtime_value, remove_runtime)
 
     register_upload_routes(app, agents_config)
     register_task_routes(app, task_manager, sse_broker, agents_config,
-                         execute_pipeline, _runtime_state, reports_dir)
+                         execute_pipeline, _runtime_state,
+                         get_runtime_value, set_runtime_value, remove_runtime,
+                         reports_dir)
     register_report_routes(app, task_manager)
     register_cnki_routes(app)
+    app.register_blueprint(settings_bp)
