@@ -4,3 +4,13 @@ dist/
 dist-electron/
 .env
 *.db
+*.db-shm
+*.db-wal
+release/
+reports/
+local-mirror/
+*.tsbuildinfo
+*.bat
+*.ps1
+test-electron.cjs
+
